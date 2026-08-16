@@ -47,19 +47,26 @@ jobs:
           architecture: x64
 
       - name: Replace engine with rustdesk custom flutter engine
+        shell: pwsh
         run: |
           flutter doctor -v
           flutter precache --windows
           Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
-          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
-          mv -Force windows-x64-release/* C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release -Force
+          $flutterBin = Split-Path (Get-Command flutter.bat).Source
+          $engineDir = Join-Path (Split-Path $flutterBin) "bin\cache\artifacts\engine\windows-x64-release"
+          if (-not (Test-Path $engineDir)) {
+            New-Item -ItemType Directory -Force -Path $engineDir
+          }
+          Copy-Item -Path windows-x64-release\* -Destination $engineDir -Force -Recurse
 
       - name: Patch flutter
         continue-on-error: true
         shell: bash
         run: |
-          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
-          cd $(dirname $(dirname $(which flutter)))
+          flutter_root=$(dirname $(dirname $(which flutter)))
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff "$flutter_root" || true
+          cd "$flutter_root"
           git apply --ignore-space-change --ignore-whitespace flutter_3.24.4_dropdown_menu_enableFilter.diff || true
 
       - name: Install Rust toolchain
@@ -84,15 +91,20 @@ jobs:
         shell: bash
 
       - name: Build rustdesk
+        shell: pwsh
         run: |
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
-          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          Move-Item -Path ./flutter/build/windows/x64/runner/Release -Destination ./rustdesk -Force
 
-          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
-          Expand-Archive usbmmidd_v2.zip -DestinationPath .
-          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
-          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
-          mv -Force .\usbmmidd_v2 ./rustdesk
+          try {
+            Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+            Expand-Archive usbmmidd_v2.zip -DestinationPath . -Force
+            Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
+            Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
+            Move-Item -Force .\usbmmidd_v2 ./rustdesk
+          } catch {
+            Write-Host "usbmmidd skipped"
+          }
 
       - name: Upload Windows Client Artifact
         uses: actions/upload-artifact@v4
