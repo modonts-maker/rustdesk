@@ -28,6 +28,31 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Hardcode Custom Server into Source Code
+        shell: pwsh
+        run: |
+          $server = "${{ secrets.RENDEZVOUS_SERVER }}"
+          $key = "${{ secrets.RS_PUB_KEY }}"
+          $api = "${{ secrets.API_SERVER }}"
+          
+          # 替换 hbb_common 中的默认服务器常量
+          Get-ChildItem -Path ./libs/hbb_common/src -Filter "*.rs" -Recurse | ForEach-Object {
+            (Get-Content $_.FullName) `
+              -replace 'rs-sg\.rustdesk\.com', $server `
+              -replace 'rs-cn\.rustdesk\.com', $server `
+              -replace 'rs-ny\.rustdesk\.com', $server `
+              -replace 'api\.rustdesk\.com', $api `
+              | Set-Content $_.FullName
+          }
+          
+          # 在 config.rs 中强制替换 RS_PUB_KEY
+          $configPath = "./libs/hbb_common/src/config.rs"
+          if (Test-Path $configPath) {
+            $content = Get-Content $configPath -Raw
+            $content = $content -replace 'pub const RS_PUB_KEY:.*?;', "pub const RS_PUB_KEY: &str = `"$key`";"
+            Set-Content -Path $configPath -Value $content
+          }
+
       - name: Restore bridge files
         uses: actions/download-artifact@v4
         with:
